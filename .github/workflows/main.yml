@@ -1,4 +1,4 @@
-name: win 11 + tailscale + Download.bat (3 instances)
+name: Win 11 + Tailscale + Roblox Studio (3 instances)
 
 on:
   workflow_dispatch:
@@ -7,38 +7,56 @@ jobs:
   secure-rdp:
     runs-on: windows-latest
     timeout-minutes: 350
+
     strategy:
       fail-fast: false
       matrix:
-        instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]     # ← عدد الأجهزة (3 أجهزة)
+        instance: [1, 2, 3]
 
     steps:
-      - name: Configure Core RDP Settings
+
+      - name: Configure RDP
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-                             -Name "fDenyTSConnections" -Value 0 -Force
+            -Name "fDenyTSConnections" -Value 0 -Force
+
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "UserAuthentication" -Value 0 -Force
+            -Name "UserAuthentication" -Value 0 -Force
+
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-                             -Name "SecurityLayer" -Value 0 -Force
+            -Name "SecurityLayer" -Value 0 -Force
 
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
+
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
             dir=in action=allow protocol=TCP localport=3389
 
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP User with Fixed Password
+
+      - name: Create RDP User
         run: |
           $password = "MR.English2008"
           $userName = "RDP"
+
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
           if (-not (Get-LocalUser -Name $userName -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name $userName -Password $securePass -AccountNeverExpires
+              New-LocalUser `
+                -Name $userName `
+                -Password $securePass `
+                -AccountNeverExpires
           }
-          Add-LocalGroupMember -Group "Administrators" -Member $userName
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $userName
+
+          Add-LocalGroupMember `
+            -Group "Administrators" `
+            -Member $userName `
+            -ErrorAction SilentlyContinue
+
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member $userName `
+            -ErrorAction SilentlyContinue
 
           echo "RDP_USER=$userName" >> $env:GITHUB_ENV
           echo "RDP_PASS=$password" >> $env:GITHUB_ENV
@@ -48,13 +66,22 @@ jobs:
               exit 1
           }
 
+
       - name: Install Tailscale
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $installerPath = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+
+          Invoke-WebRequest `
+            -Uri $tsUrl `
+            -OutFile $installerPath
+
+          Start-Process msiexec.exe `
+            -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" `
+            -Wait
+
           Remove-Item $installerPath -Force
+
 
       - name: Establish Tailscale Connection
         run: |
@@ -64,72 +91,157 @@ jobs:
 
           $tsIP = $null
           $retries = 0
+
           while (-not $tsIP -and $retries -lt 10) {
               $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
+
+              if (-not $tsIP) {
+                  Start-Sleep -Seconds 5
+              }
+
               $retries++
           }
 
           if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
+              Write-Error "Tailscale IP not assigned."
               exit 1
           }
+
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: Verify RDP Accessibility
+
+      - name: Verify RDP
         run: |
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
+
+          $testResult = Test-NetConnection `
+            -ComputerName $env:TAILSCALE_IP `
+            -Port 3389
+
           if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "TCP connection to RDP port 3389 failed"
+              Write-Error "TCP connection to RDP port 3389 failed."
               exit 1
           }
+
           Write-Host "TCP connectivity successful!"
+
+
+      - name: Install Roblox Studio
+        run: |
+          $url = "https://cdn.discordapp.com/attachments/1549740359410520195/1549768894078648441/RobloxStudioInstaller.exe?ex=6aabe641&is=6aaa94c1&hm=785bec910d05cd061e2582d05029258bfd9e25641a2909b8e056fe50e8cf10a7&"
+
+          $downloadDir = "$env:USERPROFILE\Downloads"
+          $file = "$downloadDir\RobloxStudioInstaller.exe"
+
+          if (-not (Test-Path $downloadDir)) {
+              New-Item `
+                -ItemType Directory `
+                -Path $downloadDir `
+                -Force | Out-Null
+          }
+
+          Remove-Item $file -Force -ErrorAction SilentlyContinue
+          Remove-Item "$file.crdownload" -Force -ErrorAction SilentlyContinue
+
+          Write-Host "Opening Chrome..."
+
+          Start-Process "chrome.exe" $url
+
+          Write-Host "Waiting for Roblox Studio download..."
+
+          $timeout = 300
+          $elapsed = 0
+
+          while ($elapsed -lt $timeout) {
+
+              if (Test-Path $file) {
+
+                  if (-not (Test-Path "$file.crdownload")) {
+                      Write-Host "Download completed."
+                      break
+                  }
+              }
+
+              Start-Sleep -Seconds 2
+              $elapsed += 2
+          }
+
+          if (-not (Test-Path $file)) {
+              Write-Error "Roblox Studio download failed or timed out."
+              exit 1
+          }
+
+          Write-Host "Opening Roblox Studio installer..."
+
+          Start-Process $file
+
 
       - name: Show Connection Info
         run: |
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host "  DEVICE #${{ matrix.instance }} READY"
+          Write-Host "       DEVICE #${{ matrix.instance }} READY"
           Write-Host "=========================================="
-          Write-Host "  Address : $env:TAILSCALE_IP"
-          Write-Host "  Username: $env:RDP_USER"
-          Write-Host "  Password: $env:RDP_PASS"
+          Write-Host "Address : $env:TAILSCALE_IP"
+          Write-Host "Username: RDP"
+          Write-Host "Password: $env:RDP_PASS"
           Write-Host "=========================================="
           Write-Host ""
 
-      - name: Maintain Connection + Watch RDP User
+
+      - name: Download and Run Downloads.bat
         run: |
-          $rdpProfile   = "C:\Users\$env:RDP_USER"
-          $startupPath  = "$rdpProfile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
-          $downloadUrl  = "https://gitlab.com/MR.English2008/pcme_rdp/-/raw/main/Downloads.bat"
+          $rdpProfile = "C:\Users\RDP"
+
+          $startupPath = "$rdpProfile\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
+
+          $downloadUrl = "https://gitlab.com/MR.English2008/pcme_rdp/-/raw/main/Downloads.bat"
+
           $downloadPath = "$startupPath\Downloads.bat"
 
           while ($true) {
+
               if (Test-Path $rdpProfile) {
+
                   try {
+
                       if (-not (Test-Path $startupPath)) {
-                          New-Item -ItemType Directory -Path $startupPath -Force | Out-Null
+                          New-Item `
+                            -ItemType Directory `
+                            -Path $startupPath `
+                            -Force | Out-Null
                       }
-                      Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
-                      Write-Host "✅ Downloads.bat copied to $downloadPath"
+
+                      Invoke-WebRequest `
+                        -Uri $downloadUrl `
+                        -OutFile $downloadPath `
+                        -UseBasicParsing
+
+                      Write-Host "Downloads.bat copied."
+
                       cmd /c $downloadPath
-                      Write-Host "✅ Downloads.bat executed successfully"
+
+                      Write-Host "Downloads.bat executed."
+
                       break
                   }
                   catch {
-                      Write-Host "❌ Error copying or executing Downloads.bat: $($_.Exception.Message)"
+
+                      Write-Host "Error: $($_.Exception.Message)"
                       break
                   }
               }
-              else {
-                  Write-Host "[$(Get-Date)] Waiting for RDP profile to be created..."
-                  Start-Sleep -Seconds 30
-              }
+
+              Write-Host "Waiting for RDP profile..."
+              Start-Sleep -Seconds 30
           }
 
-          # Keep runner alive
+
+      - name: Keep Runner Alive
+        run: |
           while ($true) {
+
               Write-Host "[$(Get-Date)] Device #${{ matrix.instance }} Active - IP: $env:TAILSCALE_IP"
+
               Start-Sleep -Seconds 300
           }
